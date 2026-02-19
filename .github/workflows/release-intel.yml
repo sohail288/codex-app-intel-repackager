@@ -1,0 +1,136 @@
+name: Release Intel Codex App
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Build and publish even if the upstream version tag already exists"
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: "27 */6 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-intel-codex
+  cancel-in-progress: false
+
+jobs:
+  check-upstream:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.decide.outputs.should_build }}
+      dmg_url: ${{ steps.meta.outputs.dmg_url }}
+      short_version: ${{ steps.meta.outputs.short_version }}
+      build_version: ${{ steps.meta.outputs.build_version }}
+      tag_name: ${{ steps.meta.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch upstream metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          raw="$(python3 scripts/check_upstream.py)"
+          echo "$raw" > upstream.json
+          echo "dmg_url=$(python3 -c 'import json;print(json.load(open("upstream.json"))["dmg_url"])')" >> "$GITHUB_OUTPUT"
+          echo "short_version=$(python3 -c 'import json;print(json.load(open("upstream.json"))["short_version"])')" >> "$GITHUB_OUTPUT"
+          echo "build_version=$(python3 -c 'import json;print(json.load(open("upstream.json"))["build_version"])')" >> "$GITHUB_OUTPUT"
+          echo "tag_name=$(python3 -c 'import json;print(json.load(open("upstream.json"))["tag_name"])')" >> "$GITHUB_OUTPUT"
+          cat upstream.json
+
+      - name: Decide whether to build
+        id: decide
+        uses: actions/github-script@v7
+        env:
+          TAG_NAME: ${{ steps.meta.outputs.tag_name }}
+          FORCE_BUILD: ${{ github.event.inputs.force == 'true' && 'true' || 'false' }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const tag = process.env.TAG_NAME;
+            const force = process.env.FORCE_BUILD === "true";
+            if (force) {
+              core.info(`Force build requested for ${tag}`);
+              core.setOutput("should_build", "true");
+              return;
+            }
+            try {
+              await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag,
+              });
+              core.info(`Release ${tag} already exists; skipping build.`);
+              core.setOutput("should_build", "false");
+            } catch (err) {
+              if (err.status === 404) {
+                core.info(`Release ${tag} does not exist; building.`);
+                core.setOutput("should_build", "true");
+                return;
+              }
+              throw err;
+            }
+
+  build-and-release:
+    runs-on: macos-13
+    needs: check-upstream
+    if: needs.check-upstream.outputs.should_build == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Codex CLI (x64 source binary)
+        run: npm install -g @openai/codex@latest
+
+      - name: Download upstream DMG
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 --retry-delay 2 "${{ needs.check-upstream.outputs.dmg_url }}" -o Codex.dmg
+
+      - name: Extract Codex.app from DMG
+        run: |
+          set -euo pipefail
+          MNT="$(mktemp -d)/mnt"
+          mkdir -p "$MNT"
+          hdiutil attach Codex.dmg -nobrowse -readonly -mountpoint "$MNT"
+          APP_PATH="$(find "$MNT" -maxdepth 3 -type d -name 'Codex.app' | head -n 1)"
+          if [[ -z "$APP_PATH" ]]; then
+            echo "Codex.app not found in mounted DMG" >&2
+            exit 1
+          fi
+          rm -rf Codex.app
+          ditto "$APP_PATH" Codex.app
+          hdiutil detach "$MNT"
+
+      - name: Repackage Intel app
+        run: ./scripts/repackage-intel.sh Codex.app Codex-intel.app
+
+      - name: Package artifacts
+        run: |
+          set -euo pipefail
+          ditto -c -k --sequesterRsrc --keepParent Codex-intel.app "Codex-intel-${{ needs.check-upstream.outputs.short_version }}-${{ needs.check-upstream.outputs.build_version }}.zip"
+          shasum -a 256 "Codex-intel-${{ needs.check-upstream.outputs.short_version }}-${{ needs.check-upstream.outputs.build_version }}.zip" > "Codex-intel-${{ needs.check-upstream.outputs.short_version }}-${{ needs.check-upstream.outputs.build_version }}.sha256"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.check-upstream.outputs.tag_name }}
+          name: Codex Intel ${{ needs.check-upstream.outputs.short_version }} (${{ needs.check-upstream.outputs.build_version }})
+          body: |
+            Automated Intel repack for upstream Codex Desktop.
+
+            - Upstream DMG: `${{ needs.check-upstream.outputs.dmg_url }}`
+            - Upstream version: `${{ needs.check-upstream.outputs.short_version }}`
+            - Upstream build: `${{ needs.check-upstream.outputs.build_version }}`
+          files: |
+            Codex-intel-${{ needs.check-upstream.outputs.short_version }}-${{ needs.check-upstream.outputs.build_version }}.zip
+            Codex-intel-${{ needs.check-upstream.outputs.short_version }}-${{ needs.check-upstream.outputs.build_version }}.sha256
+          fail_on_unmatched_files: true

@@ -67,3 +67,21 @@ Output:
 - `SKIP_NATIVE_REBUILD=1 ./scripts/repackage-intel.sh` (runtime-only swap)
 - `KEEP_PROD_FLAVOR=1 ./scripts/repackage-intel.sh` (keeps Sparkle enabled; likely fails unless you provide x64 `sparkle.node`)
 - `SIGN_APP=1 SIGN_IDENTITY=- ./scripts/repackage-intel.sh` (attempt ad-hoc signing; disabled by default)
+
+## GitHub Action automation
+
+This repo includes `.github/workflows/release-intel.yml` to auto-publish Intel builds.
+
+Behavior:
+
+1. Reads upstream app metadata from `appcast.xml` using `scripts/check_upstream.py`.
+2. Computes a tag: `codex-intel-v<short_version>-<build_version>`.
+3. Skips if that release tag already exists.
+4. If missing, downloads upstream DMG, repacks Intel app, and publishes release assets:
+   - `Codex-intel-<short_version>-<build_version>.zip`
+   - `Codex-intel-<short_version>-<build_version>.sha256`
+
+Triggers:
+
+- Scheduled every 6 hours.
+- Manual run (`workflow_dispatch`), with optional `force=true` to publish even if tag exists.
