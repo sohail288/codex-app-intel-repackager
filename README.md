@@ -84,4 +84,12 @@ Behavior:
 Triggers:
 
 - Scheduled every 6 hours.
-- Manual run (`workflow_dispatch`), with optional `force=true` to publish even if tag exists.
+- Manual run (`workflow_dispatch`), with optional:
+  - `force=true` to publish even if tag exists
+  - `cleanup=false` to skip deleting old releases
+  - `keep_releases=<N>` to retain N versioned releases
+
+Additional release behavior:
+
+- Maintains a moving tag/release: `codex-intel-latest`
+- Cleans up old versioned tags/releases (default keep: `10`)

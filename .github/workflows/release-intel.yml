@@ -8,6 +8,16 @@ on:
         required: false
         default: false
         type: boolean
+      keep_releases:
+        description: "Number of versioned releases to keep during cleanup"
+        required: false
+        default: "10"
+        type: string
+      cleanup:
+        description: "Delete old versioned releases after publishing"
+        required: false
+        default: true
+        type: boolean
   schedule:
     - cron: "27 */6 * * *"
 
@@ -134,3 +144,71 @@ jobs:
             Codex-intel-${{ needs.check-upstream.outputs.short_version }}-${{ needs.check-upstream.outputs.build_version }}.zip
             Codex-intel-${{ needs.check-upstream.outputs.short_version }}-${{ needs.check-upstream.outputs.build_version }}.sha256
           fail_on_unmatched_files: true
+
+      - name: Move latest tag
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f codex-intel-latest
+          git push origin refs/tags/codex-intel-latest --force
+
+      - name: Publish latest release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: codex-intel-latest
+          name: Codex Intel Latest
+          body: |
+            Moving release pointer for the newest successful Intel repack.
+
+            - Source tag: `${{ needs.check-upstream.outputs.tag_name }}`
+            - Upstream version: `${{ needs.check-upstream.outputs.short_version }}`
+            - Upstream build: `${{ needs.check-upstream.outputs.build_version }}`
+          files: |
+            Codex-intel-${{ needs.check-upstream.outputs.short_version }}-${{ needs.check-upstream.outputs.build_version }}.zip
+            Codex-intel-${{ needs.check-upstream.outputs.short_version }}-${{ needs.check-upstream.outputs.build_version }}.sha256
+          fail_on_unmatched_files: true
+
+      - name: Cleanup old versioned releases
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.cleanup == 'true'
+        uses: actions/github-script@v7
+        env:
+          KEEP_RELEASES: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.keep_releases || '10' }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const keep = Number(process.env.KEEP_RELEASES || "10");
+            const prefix = "codex-intel-v";
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const all = await github.paginate(github.rest.repos.listReleases, {
+              owner,
+              repo,
+              per_page: 100,
+            });
+
+            const versioned = all
+              .filter(r => r.tag_name && r.tag_name.startsWith(prefix) && !r.draft)
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+            const stale = versioned.slice(keep);
+            core.info(`Keeping ${Math.min(keep, versioned.length)} releases, deleting ${stale.length}.`);
+
+            for (const r of stale) {
+              core.info(`Deleting release ${r.tag_name} (#${r.id})`);
+              await github.rest.repos.deleteRelease({
+                owner,
+                repo,
+                release_id: r.id,
+              });
+              try {
+                await github.rest.git.deleteRef({
+                  owner,
+                  repo,
+                  ref: `tags/${r.tag_name}`,
+                });
+              } catch (err) {
+                core.warning(`Failed to delete tag ${r.tag_name}: ${err.message}`);
+              }
+            }
