@@ -96,7 +96,7 @@ jobs:
             }
 
   build-and-release:
-    runs-on: macos-13
+    runs-on: macos-latest
     needs: check-upstream
     if: needs.check-upstream.outputs.should_build == 'true'
     steps:
