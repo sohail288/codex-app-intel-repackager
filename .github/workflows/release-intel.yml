@@ -110,25 +110,44 @@ jobs:
       - name: Install Codex CLI (x64 source binary)
         run: npm install -g @openai/codex@latest
 
-      - name: Download upstream DMG
+      - name: Download upstream package
         run: |
           set -euo pipefail
-          curl -fL --retry 3 --retry-delay 2 "${{ needs.check-upstream.outputs.dmg_url }}" -o Codex.dmg
+          PKG_URL="${{ needs.check-upstream.outputs.dmg_url }}"
+          PKG_FILE="Codex.pkg"
+          curl -fL --retry 3 --retry-delay 2 "$PKG_URL" -o "$PKG_FILE"
+          echo "PKG_URL=$PKG_URL" >> "$GITHUB_ENV"
+          echo "PKG_FILE=$PKG_FILE" >> "$GITHUB_ENV"
 
-      - name: Extract Codex.app from DMG
+      - name: Extract Codex.app from package
         run: |
           set -euo pipefail
-          MNT="$(mktemp -d)/mnt"
-          mkdir -p "$MNT"
-          hdiutil attach Codex.dmg -nobrowse -readonly -mountpoint "$MNT"
-          APP_PATH="$(find "$MNT" -maxdepth 3 -type d -name 'Codex.app' | head -n 1)"
-          if [[ -z "$APP_PATH" ]]; then
-            echo "Codex.app not found in mounted DMG" >&2
-            exit 1
+          rm -rf Codex.app extracted_pkg
+          mkdir -p extracted_pkg
+
+          if [[ "$PKG_URL" == *.zip ]]; then
+            unzip -q "$PKG_FILE" -d extracted_pkg
+            APP_PATH="$(find extracted_pkg -maxdepth 6 -type d -name 'Codex.app' | head -n 1)"
+            if [[ -z "$APP_PATH" ]]; then
+              echo "Codex.app not found in ZIP package" >&2
+              exit 1
+            fi
+          else
+            MNT="$(mktemp -d)/mnt"
+            mkdir -p "$MNT"
+            hdiutil attach "$PKG_FILE" -nobrowse -readonly -mountpoint "$MNT"
+            APP_PATH="$(find "$MNT" -maxdepth 3 -type d -name 'Codex.app' | head -n 1)"
+            if [[ -z "$APP_PATH" ]]; then
+              echo "Codex.app not found in mounted DMG" >&2
+              exit 1
+            fi
           fi
+
           rm -rf Codex.app
           ditto "$APP_PATH" Codex.app
-          hdiutil detach "$MNT"
+          if [[ "${MNT:-}" != "" ]]; then
+            hdiutil detach "$MNT"
+          fi
 
       - name: Repackage Intel app
         run: ./scripts/repackage-intel.sh Codex.app Codex-intel.app
