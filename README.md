@@ -2,6 +2,19 @@
 
 Tools to run Codex Desktop on Intel Macs.
 
+## NOTICE
+
+Current repacked builds are not notarized. On first launch, macOS may show a warning such as
+"malicious software cannot be examined" or "cannot be opened because Apple cannot check it for malicious software."
+
+If this appears, open the app once via:
+
+1. Finder -> right click `Codex-intel.app`
+2. Click `Open`
+3. Confirm `Open` in the prompt
+
+After this one-time approval, normal launches should work.
+
 ## Problem
 
 The bundled app is arm64-only:
