@@ -106,8 +106,8 @@ def main() -> int:
     LOGGER.debug("Received XML payload: bytes=%s", len(xml_bytes))
     if LOGGER.isEnabledFor(logging.DEBUG):
         try:
-            xml_text = xml_bytes.decode("utf-8", errors="replace")
-            LOGGER.debug("XML snippet: %s", sanitize_snippet(xml_text))
+            xml_content = xml_bytes.decode("utf-8", errors="replace")
+            LOGGER.debug("XML snippet: %s", sanitize_snippet(xml_content))
         except Exception as exc:
             LOGGER.debug("Could not decode XML snippet: %s: %s", type(exc).__name__, exc)
 
