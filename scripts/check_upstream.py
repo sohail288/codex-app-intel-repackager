@@ -13,6 +13,7 @@ import xml.etree.ElementTree as ET
 
 APPCAST_URL = "https://persistent.oaistatic.com/codex-app-prod/appcast.xml"
 SPARKLE_NS = {"sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle"}
+SPARKLE_URI = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 
 
 def setup_logger() -> logging.Logger:
@@ -39,6 +40,13 @@ def sanitize_snippet(text: str, limit: int = 400) -> str:
     if len(compact) <= limit:
         return compact
     return compact[: limit - 3] + "..."
+
+
+def xml_text(el: ET.Element | None) -> str | None:
+    if el is None or el.text is None:
+        return None
+    value = el.text.strip()
+    return value if value else None
 
 
 def fetch_bytes(url: str) -> bytes:
@@ -122,8 +130,13 @@ def main() -> int:
     LOGGER.debug("Enclosure attrs keys: %s", sorted(enclosure.attrib.keys()))
 
     dmg_url = enclosure.attrib.get("url")
-    short_version = enclosure.attrib.get("{http://www.andymatuschak.org/xml-namespaces/sparkle}shortVersionString")
-    build_version = enclosure.attrib.get("{http://www.andymatuschak.org/xml-namespaces/sparkle}version")
+    # Newer appcast puts version values on <item> as sparkle:* elements.
+    short_version = xml_text(item.find("./sparkle:shortVersionString", SPARKLE_NS)) or enclosure.attrib.get(
+        f"{{{SPARKLE_URI}}}shortVersionString"
+    )
+    build_version = xml_text(item.find("./sparkle:version", SPARKLE_NS)) or enclosure.attrib.get(
+        f"{{{SPARKLE_URI}}}version"
+    )
     pub_date_el = item.find("./pubDate")
     pub_date = pub_date_el.text.strip() if pub_date_el is not None and pub_date_el.text else ""
 
