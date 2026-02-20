@@ -113,11 +113,11 @@ jobs:
       - name: Resolve x64 codex binary path
         run: |
           set -euo pipefail
-          npm install -g @openai/codex-darwin-x64@latest
           ROOT="$(npm root -g)"
-          CANDIDATE="$ROOT/@openai/codex-darwin-x64/vendor/x86_64-apple-darwin/codex/codex"
-          if [[ ! -x "$CANDIDATE" ]]; then
-            echo "x64 codex binary not found at $CANDIDATE" >&2
+          CANDIDATE="$(find "$ROOT" -type f -path '*/x86_64-apple-darwin/codex/codex' | head -n 1 || true)"
+          if [[ -z "$CANDIDATE" || ! -x "$CANDIDATE" ]]; then
+            echo "x64 codex binary not found under npm root: $ROOT" >&2
+            find "$ROOT" -maxdepth 6 -type f -name codex | sed -n '1,80p' >&2 || true
             exit 1
           fi
           echo "CODEX_X64_BINARY=$CANDIDATE" >> "$GITHUB_ENV"
