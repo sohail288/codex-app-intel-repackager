@@ -71,13 +71,25 @@ replace_bundled_codex_cli() {
   local src dst
   dst="$OUT_APP/Contents/Resources/codex"
 
-  if ! src="$(find_x64_codex_binary)"; then
-    log "Warning: could not locate x64 codex binary; bundled Resources/codex may remain incompatible"
+  if src="$(find_x64_codex_binary)"; then
+    log "Replacing bundled Resources/codex with x64 binary from: $src"
+    copy_binary_slice "$src" "$dst"
     return
   fi
 
-  log "Replacing bundled Resources/codex with x64 binary from: $src"
-  copy_binary_slice "$src" "$dst"
+  log "x64 codex binary not found; replacing Resources/codex with PATH wrapper"
+  cat > "$dst" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if command -v codex >/dev/null 2>&1; then
+  exec codex "$@"
+fi
+
+echo "codex CLI not found in PATH. Install Codex CLI and retry." >&2
+exit 127
+SH
+  chmod 755 "$dst"
 }
 
 replace_runtime() {

@@ -111,6 +111,7 @@ jobs:
         run: npm install -g @openai/codex@latest
 
       - name: Resolve x64 codex binary path
+        continue-on-error: true
         run: |
           set -euo pipefail
           rm -rf .ci-x64-codex
