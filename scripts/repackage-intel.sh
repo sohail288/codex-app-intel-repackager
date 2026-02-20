@@ -82,11 +82,43 @@ replace_bundled_codex_cli() {
 #!/usr/bin/env bash
 set -euo pipefail
 
-if command -v codex >/dev/null 2>&1; then
-  exec codex "$@"
+resolve_codex() {
+  local p
+
+  if command -v codex >/dev/null 2>&1; then
+    command -v codex
+    return 0
+  fi
+
+  for p in /usr/local/bin/codex /opt/homebrew/bin/codex; do
+    if [[ -x "$p" ]]; then
+      printf '%s\n' "$p"
+      return 0
+    fi
+  done
+
+  if [[ -d "$HOME/.nvm/versions/node" ]]; then
+    p="$(ls -1d "$HOME/.nvm/versions/node/"*/bin/codex 2>/dev/null | tail -n 1 || true)"
+    if [[ -n "${p}" && -x "${p}" ]]; then
+      printf '%s\n' "$p"
+      return 0
+    fi
+  fi
+
+  p="$(/bin/bash -lc 'command -v codex' 2>/dev/null || true)"
+  if [[ -n "$p" && -x "$p" ]]; then
+    printf '%s\n' "$p"
+    return 0
+  fi
+
+  return 1
+}
+
+if COD="$(resolve_codex)"; then
+  exec "$COD" "$@"
 fi
 
-echo "codex CLI not found in PATH. Install Codex CLI and retry." >&2
+echo "codex CLI not found. Install Codex CLI (x64) and ensure it is discoverable from GUI apps." >&2
 exit 127
 SH
   chmod 755 "$dst"
