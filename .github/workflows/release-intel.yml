@@ -107,13 +107,15 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Install Codex CLI and x64 binary package
+      - name: Install Codex CLI
         run: npm install -g @openai/codex@latest
 
       - name: Resolve x64 codex binary path
         run: |
           set -euo pipefail
-          ROOT="$(npm root -g)"
+          rm -rf .ci-x64-codex
+          npm_config_arch=x64 npm_config_platform=darwin npm install --prefix .ci-x64-codex @openai/codex@latest
+          ROOT=".ci-x64-codex/node_modules"
           CANDIDATE="$(find "$ROOT" -type f -path '*/x86_64-apple-darwin/codex/codex' | head -n 1 || true)"
           if [[ -z "$CANDIDATE" || ! -x "$CANDIDATE" ]]; then
             echo "x64 codex binary not found under npm root: $ROOT" >&2
