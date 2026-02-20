@@ -3,6 +3,11 @@ name: Release Intel Codex App
 on:
   workflow_dispatch:
     inputs:
+      debug:
+        description: "Enable verbose debug logging for upstream metadata fetch/parsing"
+        required: false
+        default: false
+        type: boolean
       force:
         description: "Build and publish even if the upstream version tag already exists"
         required: false
@@ -42,8 +47,13 @@ jobs:
 
       - name: Fetch upstream metadata
         id: meta
+        env:
+          CHECK_UPSTREAM_LOG_LEVEL: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug == 'true' && 'DEBUG' || 'WARNING' }}
         run: |
           set -euo pipefail
+          if [[ "${CHECK_UPSTREAM_LOG_LEVEL}" == "DEBUG" ]]; then
+            echo "Debug mode enabled for upstream metadata fetch (CHECK_UPSTREAM_LOG_LEVEL=${CHECK_UPSTREAM_LOG_LEVEL})"
+          fi
           raw="$(python3 scripts/check_upstream.py)"
           echo "$raw" > upstream.json
           echo "dmg_url=$(python3 -c 'import json;print(json.load(open("upstream.json"))["dmg_url"])')" >> "$GITHUB_OUTPUT"
