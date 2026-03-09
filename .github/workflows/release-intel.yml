@@ -167,6 +167,26 @@ jobs:
       - name: Repackage Intel app
         run: ./scripts/repackage-intel.sh Codex.app Codex-intel.app
 
+      - name: Smoke test repackaged app
+        run: |
+          set -euo pipefail
+          APP="Codex-intel.app"
+
+          # Critical Intel slices must be x86_64.
+          file "$APP/Contents/MacOS/Codex" | grep -q 'x86_64'
+          file "$APP/Contents/Resources/codex" | grep -q 'x86_64'
+          file "$APP/Contents/Resources/app.asar.unpacked/node_modules/node-pty/build/Release/pty.node" | grep -q 'x86_64'
+          file "$APP/Contents/Resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node" | grep -q 'x86_64'
+
+          if [[ -x "$APP/Contents/Resources/rg" ]]; then
+            file "$APP/Contents/Resources/rg" | grep -q 'x86_64'
+            "$APP/Contents/Resources/rg" --version >/dev/null
+          fi
+
+          # Basic executable sanity.
+          "$APP/Contents/Resources/codex" --version >/dev/null
+          codesign --verify --deep --strict "$APP"
+
       - name: Package artifacts
         run: |
           set -euo pipefail
@@ -212,6 +232,35 @@ jobs:
             Codex-intel-${{ needs.check-upstream.outputs.short_version }}-${{ needs.check-upstream.outputs.build_version }}.zip
             Codex-intel-${{ needs.check-upstream.outputs.short_version }}-${{ needs.check-upstream.outputs.build_version }}.sha256
           fail_on_unmatched_files: true
+
+      - name: Prune stale latest assets
+        uses: actions/github-script@v7
+        env:
+          KEEP_ZIP: Codex-intel-${{ needs.check-upstream.outputs.short_version }}-${{ needs.check-upstream.outputs.build_version }}.zip
+          KEEP_SHA: Codex-intel-${{ needs.check-upstream.outputs.short_version }}-${{ needs.check-upstream.outputs.build_version }}.sha256
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const tag = "codex-intel-latest";
+            const keep = new Set([process.env.KEEP_ZIP, process.env.KEEP_SHA]);
+
+            const rel = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+            const assets = rel.data.assets || [];
+
+            for (const asset of assets) {
+              if (keep.has(asset.name)) {
+                core.info(`Keeping latest asset: ${asset.name}`);
+                continue;
+              }
+              core.info(`Deleting stale latest asset: ${asset.name}`);
+              await github.rest.repos.deleteReleaseAsset({
+                owner,
+                repo,
+                asset_id: asset.id,
+              });
+            }
 
       - name: Cleanup old versioned releases
         if: github.event_name != 'workflow_dispatch' || github.event.inputs.cleanup == 'true'
