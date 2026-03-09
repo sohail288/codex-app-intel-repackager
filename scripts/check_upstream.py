@@ -9,6 +9,7 @@ import subprocess
 import sys
 import urllib.request
 import xml.etree.ElementTree as ET
+from typing import cast
 
 APPCAST_URL = "https://persistent.oaistatic.com/codex-app-prod/appcast.xml"
 SPARKLE_NS = {"sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle"}
@@ -74,7 +75,7 @@ def fetch_bytes(url: str) -> bytes:
     try:
         _logger.debug("Fetching appcast via urllib: %s", url)
         with urllib.request.urlopen(req, timeout=30) as resp:
-            data = resp.read()
+            data = cast(bytes, resp.read())
             _logger.debug(
                 "urllib fetch success: status=%s bytes=%s",
                 getattr(resp, "status", "unknown"),
@@ -88,7 +89,7 @@ def fetch_bytes(url: str) -> bytes:
             exc,
         )
         # Fallback to curl for CI environments where urllib is blocked.
-        out = subprocess.check_output(
+        out: bytes = subprocess.check_output(
             [
                 "curl",
                 "-fLsS",
