@@ -82,7 +82,7 @@ Output:
 - `KEEP_PROD_FLAVOR=1 ./scripts/repackage-intel.sh` (keeps Sparkle enabled; likely fails unless you provide x64 `sparkle.node`)
 - `SIGN_APP=1 SIGN_IDENTITY=- ./scripts/repackage-intel.sh` (attempt ad-hoc signing; disabled by default)
 - `RG_X64_BINARY=/usr/local/bin/rg ./scripts/repackage-intel.sh` (use a specific Intel ripgrep binary)
-- `RIPGREP_VERSION=15.1.0 ./scripts/repackage-intel.sh` (pin ripgrep version instead of auto-resolving the latest x64 release)
+- `RIPGREP_VERSION=15.1.0 ./scripts/repackage-intel.sh` (override the default pinned ripgrep version used for x64 replacement)
 
 ## GitHub Action automation
 

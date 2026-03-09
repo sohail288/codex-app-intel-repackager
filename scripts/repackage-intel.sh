@@ -13,7 +13,7 @@ SIGN_APP="${SIGN_APP:-1}"
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 CODEX_X64_BINARY="${CODEX_X64_BINARY:-}"
 RG_X64_BINARY="${RG_X64_BINARY:-}"
-RIPGREP_VERSION="${RIPGREP_VERSION:-}"
+RIPGREP_VERSION="${RIPGREP_VERSION:-14.1.1}"
 RIPGREP_TARBALL_URL="${RIPGREP_TARBALL_URL:-}"
 
 BETTER_SQLITE3_VERSION="12.4.6"
@@ -109,26 +109,13 @@ download_x64_rg_binary() {
 
   if [[ -n "$RIPGREP_TARBALL_URL" ]]; then
     tarball_url="$RIPGREP_TARBALL_URL"
-  elif [[ -n "$RIPGREP_VERSION" ]]; then
-    tarball_url="https://github.com/BurntSushi/ripgrep/releases/download/${RIPGREP_VERSION}/ripgrep-${RIPGREP_VERSION}-x86_64-apple-darwin.tar.gz"
   else
-    tarball_url="$(
-      python3 - <<'PY'
-import json
-import urllib.request
+    tarball_url="https://github.com/BurntSushi/ripgrep/releases/download/${RIPGREP_VERSION}/ripgrep-${RIPGREP_VERSION}-x86_64-apple-darwin.tar.gz"
+  fi
 
-with urllib.request.urlopen("https://api.github.com/repos/BurntSushi/ripgrep/releases/latest") as response:
-    data = json.load(response)
-
-for asset in data.get("assets", []):
-    name = asset.get("name", "")
-    if name.endswith("x86_64-apple-darwin.tar.gz"):
-        print(asset["browser_download_url"])
-        break
-else:
-    raise SystemExit("No x86_64 ripgrep asset found in latest release")
-PY
-    )"
+  if [[ -z "$tarball_url" ]]; then
+    echo "failed to resolve x64 ripgrep tarball URL" >&2
+    exit 1
   fi
 
   tarball_path="$rg_work_dir/$(basename "$tarball_url")"
@@ -385,7 +372,6 @@ main() {
   need_cmd unzip
   need_cmd lipo
   need_cmd npm
-  need_cmd python3
   need_cmd tar
 
   if [[ "$SIGN_APP" == "1" ]]; then
