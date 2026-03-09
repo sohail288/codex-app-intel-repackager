@@ -12,6 +12,9 @@ KEEP_PROD_FLAVOR="${KEEP_PROD_FLAVOR:-0}"
 SIGN_APP="${SIGN_APP:-1}"
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 CODEX_X64_BINARY="${CODEX_X64_BINARY:-}"
+RG_X64_BINARY="${RG_X64_BINARY:-}"
+RIPGREP_VERSION="${RIPGREP_VERSION:-}"
+RIPGREP_TARBALL_URL="${RIPGREP_TARBALL_URL:-}"
 
 BETTER_SQLITE3_VERSION="12.4.6"
 NODE_PTY_VERSION="1.1.0"
@@ -42,6 +45,12 @@ copy_binary_slice() {
   install -m 755 "$src" "$dst"
 }
 
+is_x64_macho() {
+  local target="$1"
+  [[ -x "$target" ]] || return 1
+  file "$target" 2>/dev/null | grep -q 'x86_64'
+}
+
 find_x64_codex_binary() {
   local codex_cli prefix candidate
 
@@ -65,6 +74,75 @@ find_x64_codex_binary() {
   fi
 
   return 1
+}
+
+find_x64_rg_binary() {
+  local candidate p
+
+  if [[ -n "$RG_X64_BINARY" && -x "$RG_X64_BINARY" ]] && is_x64_macho "$RG_X64_BINARY"; then
+    printf '%s\n' "$RG_X64_BINARY"
+    return 0
+  fi
+
+  for candidate in "$(command -v rg || true)" /usr/local/bin/rg /opt/homebrew/bin/rg; do
+    if [[ -n "$candidate" ]] && is_x64_macho "$candidate"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  if [[ -d "$HOME/.nvm/versions/node" ]]; then
+    p="$(find "$HOME/.nvm/versions/node" -path '*/bin/rg' -type f 2>/dev/null | tail -n 1 || true)"
+    if [[ -n "$p" ]] && is_x64_macho "$p"; then
+      printf '%s\n' "$p"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+download_x64_rg_binary() {
+  local rg_work_dir tarball_url tarball_path extract_dir
+  rg_work_dir="$WORK_DIR/ripgrep"
+  mkdir -p "$rg_work_dir"
+
+  if [[ -n "$RIPGREP_TARBALL_URL" ]]; then
+    tarball_url="$RIPGREP_TARBALL_URL"
+  elif [[ -n "$RIPGREP_VERSION" ]]; then
+    tarball_url="https://github.com/BurntSushi/ripgrep/releases/download/${RIPGREP_VERSION}/ripgrep-${RIPGREP_VERSION}-x86_64-apple-darwin.tar.gz"
+  else
+    tarball_url="$(
+      python3 - <<'PY'
+import json
+import urllib.request
+
+with urllib.request.urlopen("https://api.github.com/repos/BurntSushi/ripgrep/releases/latest") as response:
+    data = json.load(response)
+
+for asset in data.get("assets", []):
+    name = asset.get("name", "")
+    if name.endswith("x86_64-apple-darwin.tar.gz"):
+        print(asset["browser_download_url"])
+        break
+else:
+    raise SystemExit("No x86_64 ripgrep asset found in latest release")
+PY
+    )"
+  fi
+
+  tarball_path="$rg_work_dir/$(basename "$tarball_url")"
+  if [[ ! -f "$tarball_path" ]]; then
+    log "Downloading x64 ripgrep from: $tarball_url"
+    curl -fL --retry 3 --retry-delay 2 "$tarball_url" -o "$tarball_path"
+  fi
+
+  extract_dir="$rg_work_dir/extracted"
+  rm -rf "$extract_dir"
+  mkdir -p "$extract_dir"
+  tar -xzf "$tarball_path" -C "$extract_dir"
+
+  find "$extract_dir" -path '*/rg' -type f -perm -111 | head -n 1
 }
 
 replace_bundled_codex_cli() {
@@ -122,6 +200,22 @@ echo "codex CLI not found. Install Codex CLI (x64) and ensure it is discoverable
 exit 127
 SH
   chmod 755 "$dst"
+}
+
+replace_bundled_rg() {
+  local src dst
+  dst="$OUT_APP/Contents/Resources/rg"
+
+  if src="$(find_x64_rg_binary)"; then
+    log "Replacing bundled Resources/rg with x64 binary from: $src"
+    copy_binary_slice "$src" "$dst"
+    return
+  fi
+
+  src="$(download_x64_rg_binary)"
+  [[ -n "$src" && -f "$src" ]] || { echo "failed to resolve x64 rg binary" >&2; exit 1; }
+  log "Replacing bundled Resources/rg with downloaded x64 binary"
+  copy_binary_slice "$src" "$dst"
 }
 
 replace_runtime() {
@@ -280,6 +374,7 @@ verify_arch() {
   log "Verifying x86_64 slices"
   file "$OUT_APP/Contents/MacOS/Codex"
   file "$OUT_APP/Contents/Frameworks/Electron Framework.framework/Electron Framework"
+  file "$OUT_APP/Contents/Resources/rg"
   file "$OUT_APP/Contents/Resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node" || true
   file "$OUT_APP/Contents/Resources/app.asar.unpacked/node_modules/node-pty/build/Release/pty.node" || true
 }
@@ -290,6 +385,8 @@ main() {
   need_cmd unzip
   need_cmd lipo
   need_cmd npm
+  need_cmd python3
+  need_cmd tar
 
   if [[ "$SIGN_APP" == "1" ]]; then
     need_cmd codesign
@@ -331,6 +428,7 @@ main() {
 
   replace_runtime "$electron_app"
   replace_bundled_codex_cli
+  replace_bundled_rg
 
   if [[ "$SKIP_NATIVE_REBUILD" != "1" ]]; then
     build_native_modules
