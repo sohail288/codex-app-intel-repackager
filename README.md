@@ -108,4 +108,5 @@ Triggers:
 Additional release behavior:
 
 - Maintains a moving tag/release: `codex-intel-latest`
+- Keeps only the newest `.zip` and `.sha256` assets on `codex-intel-latest`
 - Cleans up old versioned tags/releases (default keep: `10`)
