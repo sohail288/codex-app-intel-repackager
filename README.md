@@ -52,8 +52,9 @@ What it does:
 4. Rebuilds native modules for Electron x64:
    - `better-sqlite3@12.4.6`
    - `node-pty@1.1.0`
-5. Sets `BUILD_FLAVOR=dev` in `Info.plist` by default to skip Sparkle (`sparkle.node` in this bundle is arm64-only).
-6. Optionally signs the app when `SIGN_APP=1`.
+5. Replaces bundled helper binaries that remain arm64-only, including `Contents/Resources/rg`.
+6. Sets `BUILD_FLAVOR=dev` in `Info.plist` by default to skip Sparkle (`sparkle.node` in this bundle is arm64-only).
+7. Optionally signs the app when `SIGN_APP=1`.
 
 ### Repack command
 
@@ -80,6 +81,8 @@ Output:
 - `SKIP_NATIVE_REBUILD=1 ./scripts/repackage-intel.sh` (runtime-only swap)
 - `KEEP_PROD_FLAVOR=1 ./scripts/repackage-intel.sh` (keeps Sparkle enabled; likely fails unless you provide x64 `sparkle.node`)
 - `SIGN_APP=1 SIGN_IDENTITY=- ./scripts/repackage-intel.sh` (attempt ad-hoc signing; disabled by default)
+- `RG_X64_BINARY=/usr/local/bin/rg ./scripts/repackage-intel.sh` (use a specific Intel ripgrep binary)
+- `RIPGREP_VERSION=15.1.0 ./scripts/repackage-intel.sh` (pin ripgrep version instead of auto-resolving the latest x64 release)
 
 ## GitHub Action automation
 
