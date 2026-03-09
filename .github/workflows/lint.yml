@@ -1,0 +1,40 @@
+name: Lint
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python linters
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install ruff mypy
+
+      - name: Ruff
+        run: ruff check scripts/check_upstream.py
+
+      - name: Mypy
+        run: mypy --python-version 3.10 --strict scripts/check_upstream.py
+
+      - name: ShellCheck
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          shellcheck scripts/repackage-intel.sh
