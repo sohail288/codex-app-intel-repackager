@@ -9,7 +9,7 @@ import subprocess
 import sys
 import urllib.request
 import xml.etree.ElementTree as ET
-from typing import cast
+from typing import Optional, cast
 
 APPCAST_URL = "https://persistent.oaistatic.com/codex-app-prod/appcast.xml"
 SPARKLE_NS = {"sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle"}
@@ -52,7 +52,7 @@ def sanitize_snippet(text: str, limit: int = 400) -> str:
     return compact[: limit - 3] + "..."
 
 
-def xml_text(el: ET.Element | None) -> str | None:
+def xml_text(el: Optional[ET.Element]) -> Optional[str]:
     if el is None or el.text is None:
         return None
     value = el.text.strip()

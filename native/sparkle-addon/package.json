@@ -1,0 +1,8 @@
+{
+  "name": "codex-intel-sparkle-addon",
+  "private": true,
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "node-gyp": "^11.4.2"
+  }
+}

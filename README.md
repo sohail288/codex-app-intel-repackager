@@ -53,8 +53,9 @@ What it does:
    - `better-sqlite3@12.4.6`
    - `node-pty@1.1.0`
 5. Replaces bundled helper binaries that remain arm64-only, including `Contents/Resources/rg`.
-6. Sets `BUILD_FLAVOR=dev` in `Info.plist` by default to skip Sparkle (`sparkle.node` in this bundle is arm64-only).
-7. Optionally signs the app when `SIGN_APP=1`.
+6. Rebuilds an Intel `sparkle.node` addon when Sparkle is kept enabled.
+7. Defaults to `BUILD_FLAVOR=dev` only when no GitHub-release Sparkle config is provided.
+8. Optionally signs the app when `SIGN_APP=1`.
 
 ### Repack command
 
@@ -79,10 +80,11 @@ Output:
 
 - `ELECTRON_VERSION=40.0.0 ./scripts/repackage-intel.sh`
 - `SKIP_NATIVE_REBUILD=1 ./scripts/repackage-intel.sh` (runtime-only swap)
-- `KEEP_PROD_FLAVOR=1 ./scripts/repackage-intel.sh` (keeps Sparkle enabled; likely fails unless you provide x64 `sparkle.node`)
+- `KEEP_PROD_FLAVOR=1 ./scripts/repackage-intel.sh` (keeps Sparkle enabled and rebuilds the Intel updater bridge)
 - `SIGN_APP=1 SIGN_IDENTITY=- ./scripts/repackage-intel.sh` (attempt ad-hoc signing; disabled by default)
 - `RG_X64_BINARY=/usr/local/bin/rg ./scripts/repackage-intel.sh` (use a specific Intel ripgrep binary)
 - `RIPGREP_VERSION=15.1.0 ./scripts/repackage-intel.sh` (override the default pinned ripgrep version used for x64 replacement)
+- `SPARKLE_FEED_URL=https://github.com/<owner>/<repo>/releases/download/codex-intel-latest/appcast.xml SPARKLE_PUBLIC_ED_KEY=<public-key> ./scripts/repackage-intel.sh` (enable GitHub Releases auto-update for the repacked app)
 
 ## GitHub Action automation
 
@@ -108,5 +110,12 @@ Triggers:
 Additional release behavior:
 
 - Maintains a moving tag/release: `codex-intel-latest`
-- Keeps only the newest `.zip` and `.sha256` assets on `codex-intel-latest`
+- Keeps stable latest assets on `codex-intel-latest`:
+  - `Codex-intel-latest.zip`
+  - `Codex-intel-latest.sha256`
+  - `appcast.xml` (when Sparkle secrets are configured)
 - Cleans up old versioned tags/releases (default keep: `10`)
+- To enable GitHub Releases auto-update in published builds, configure these repository secrets:
+  - `SPARKLE_PUBLIC_ED_KEY`
+  - `SPARKLE_PRIVATE_KEY`
+- Without those secrets, the workflow still publishes Intel builds but keeps the previous dev-flavor/no-updater fallback.

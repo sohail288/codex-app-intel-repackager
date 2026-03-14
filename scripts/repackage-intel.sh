@@ -11,6 +11,8 @@ SKIP_NATIVE_REBUILD="${SKIP_NATIVE_REBUILD:-0}"
 KEEP_PROD_FLAVOR="${KEEP_PROD_FLAVOR:-0}"
 SIGN_APP="${SIGN_APP:-1}"
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
+SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-}"
+SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-}"
 CODEX_X64_BINARY="${CODEX_X64_BINARY:-}"
 RG_X64_BINARY="${RG_X64_BINARY:-}"
 RIPGREP_VERSION="${RIPGREP_VERSION:-14.1.1}"
@@ -37,6 +39,14 @@ abs_path() {
   else
     printf '%s/%s\n' "$PWD" "$p"
   fi
+}
+
+should_keep_prod_flavor() {
+  [[ "$KEEP_PROD_FLAVOR" == "1" ]] || has_managed_sparkle_config
+}
+
+has_managed_sparkle_config() {
+  [[ -n "$SPARKLE_FEED_URL" && -n "$SPARKLE_PUBLIC_ED_KEY" ]]
 }
 
 copy_binary_slice() {
@@ -263,12 +273,13 @@ JSON
 
   (
     cd "$native_dir"
-    npm_config_arch=x64 \
-    npm_config_target="$ELECTRON_VERSION" \
-    npm_config_runtime=electron \
-    npm_config_disturl=https://electronjs.org/headers \
-    npm_config_build_from_source=true \
-    npm install --no-audit --no-fund
+    npm install --ignore-scripts --no-audit --no-fund
+    npm rebuild better-sqlite3 node-pty \
+      --build-from-source \
+      --runtime=electron \
+      --target="$ELECTRON_VERSION" \
+      --dist-url=https://electronjs.org/headers \
+      --arch=x64
   )
 
   local app_unpacked="$OUT_APP/Contents/Resources/app.asar.unpacked"
@@ -289,13 +300,16 @@ JSON
     install -m 755 "$spawn_src" "$app_unpacked/node_modules/node-pty/build/Release/spawn-helper"
   fi
 
+  rm -rf "$app_unpacked/node_modules/node-pty/bin"/darwin-arm64-*
   mkdir -p "$app_unpacked/node_modules/node-pty/bin/darwin-x64-$target_abi"
   install -m 755 "$pty_src" "$app_unpacked/node_modules/node-pty/bin/darwin-x64-$target_abi/node-pty.node"
 }
 
 set_dev_flavor() {
   local plist="$OUT_APP/Contents/Info.plist"
-  if [[ "$KEEP_PROD_FLAVOR" == "1" ]]; then
+  if should_keep_prod_flavor; then
+    log "Keeping production build flavor"
+    /usr/libexec/PlistBuddy -c "Delete :LSEnvironment:BUILD_FLAVOR" "$plist" >/dev/null 2>&1 || true
     return
   fi
 
@@ -305,7 +319,7 @@ set_dev_flavor() {
 }
 
 strip_sparkle_for_dev() {
-  if [[ "$KEEP_PROD_FLAVOR" == "1" ]]; then
+  if should_keep_prod_flavor; then
     return
   fi
 
@@ -313,6 +327,78 @@ strip_sparkle_for_dev() {
   rm -rf "$OUT_APP/Contents/Frameworks/Sparkle.framework"
   rm -f "$OUT_APP/Contents/Resources/native/sparkle.node"
   rm -f "$OUT_APP/Contents/Resources/app.asar.unpacked/native/sparkle.node"
+}
+
+patch_sparkle_metadata() {
+  if ! has_managed_sparkle_config; then
+    log "Sparkle feed or public key missing; keeping packaged metadata unchanged"
+    return
+  fi
+
+  local plist="$OUT_APP/Contents/Info.plist"
+  local asar_dir="$WORK_DIR/app-asar"
+  local package_json="$asar_dir/package.json"
+
+  log "Patching packaged Sparkle feed URL"
+  rm -rf "$asar_dir"
+  mkdir -p "$asar_dir"
+  npx --yes @electron/asar extract "$OUT_APP/Contents/Resources/app.asar" "$asar_dir"
+
+  node - "$package_json" "$SPARKLE_FEED_URL" <<'NODE'
+const fs = require('fs');
+
+const [packageJsonPath, feedUrl] = process.argv.slice(2);
+const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+pkg.codexBuildFlavor = 'prod';
+pkg.codexSparkleFeedUrl = feedUrl;
+fs.writeFileSync(packageJsonPath, `${JSON.stringify(pkg, null, 2)}\n`);
+NODE
+
+  rm -f "$OUT_APP/Contents/Resources/app.asar"
+  npx --yes @electron/asar pack "$asar_dir" "$OUT_APP/Contents/Resources/app.asar"
+
+  log "Updating Info.plist Sparkle keys"
+  /usr/libexec/PlistBuddy -c "Delete :SUFeedURL" "$plist" >/dev/null 2>&1 || true
+  /usr/libexec/PlistBuddy -c "Add :SUFeedURL string $SPARKLE_FEED_URL" "$plist"
+  /usr/libexec/PlistBuddy -c "Delete :SUPublicEDKey" "$plist" >/dev/null 2>&1 || true
+  /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string $SPARKLE_PUBLIC_ED_KEY" "$plist"
+}
+
+build_sparkle_addon() {
+  if ! should_keep_prod_flavor; then
+    return
+  fi
+
+  local addon_dir="$WORK_DIR/sparkle-addon"
+  local addon_src="$ROOT_DIR/native/sparkle-addon"
+  local app_resources="$OUT_APP/Contents/Resources"
+  local addon_bin
+
+  [[ -d "$addon_src" ]] || { echo "missing sparkle addon sources: $addon_src" >&2; exit 1; }
+
+  log "Building Intel Sparkle addon"
+  rm -rf "$addon_dir"
+  mkdir -p "$addon_dir"
+  cp -R "$addon_src/." "$addon_dir/"
+
+  (
+    cd "$addon_dir"
+    npm install --ignore-scripts --no-audit --no-fund
+
+    SPARKLE_FRAMEWORK_DIR="$OUT_APP/Contents/Frameworks" \
+    ./node_modules/.bin/node-gyp rebuild \
+      --release \
+      --arch=x64 \
+      --target="$ELECTRON_VERSION" \
+      --dist-url=https://electronjs.org/headers
+  )
+
+  addon_bin="$addon_dir/build/Release/sparkle.node"
+  [[ -f "$addon_bin" ]] || { echo "missing rebuilt sparkle.node" >&2; exit 1; }
+
+  mkdir -p "$app_resources/native" "$app_resources/app.asar.unpacked/native"
+  install -m 755 "$addon_bin" "$app_resources/native/sparkle.node"
+  install -m 755 "$addon_bin" "$app_resources/app.asar.unpacked/native/sparkle.node"
 }
 
 ad_hoc_sign() {
@@ -335,6 +421,11 @@ ad_hoc_sign() {
       continue
     fi
     codesign --force --deep --sign "$SIGN_IDENTITY" "$p"
+  done
+
+  log "Signing rebuilt binaries in Resources"
+  find "$OUT_APP/Contents/Resources" -type f \( -name "*.node" -o -name "codex" -o -name "rg" -o -name "spawn-helper" \) -print0 | while IFS= read -r -d '' p; do
+    codesign --force --sign "$SIGN_IDENTITY" "$p"
   done
 
   # Finally sign the top-level app bundle.
@@ -372,6 +463,7 @@ main() {
   need_cmd unzip
   need_cmd lipo
   need_cmd npm
+  need_cmd node
   need_cmd tar
 
   if [[ "$SIGN_APP" == "1" ]]; then
@@ -423,6 +515,8 @@ main() {
   fi
 
   set_dev_flavor
+  patch_sparkle_metadata
+  build_sparkle_addon
   strip_sparkle_for_dev
   ad_hoc_sign
   clear_quarantine
