@@ -115,10 +115,7 @@ Additional release behavior:
   - `Codex-intel-latest.sha256`
   - `appcast.xml` (when Sparkle secrets are configured)
 - Cleans up old versioned tags/releases (default keep: `10`)
-
-Auto-update from GitHub Releases is enabled when these repository secrets are configured:
-
-- `SPARKLE_PUBLIC_ED_KEY`
-- `SPARKLE_PRIVATE_KEY`
-
-Without them, the workflow keeps the previous dev-flavor/no-updater fallback.
+- To enable GitHub Releases auto-update in published builds, configure these repository secrets:
+  - `SPARKLE_PUBLIC_ED_KEY`
+  - `SPARKLE_PRIVATE_KEY`
+- Without those secrets, the workflow still publishes Intel builds but keeps the previous dev-flavor/no-updater fallback.
