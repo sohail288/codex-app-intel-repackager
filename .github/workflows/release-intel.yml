@@ -178,6 +178,7 @@ jobs:
         run: |
           set -euo pipefail
           APP="Codex-intel.app"
+          ASAR_DIR="$(mktemp -d)"
 
           # Critical Intel slices must be x86_64.
           file "$APP/Contents/MacOS/Codex" | grep -q 'x86_64'
@@ -192,8 +193,13 @@ jobs:
 
           if [[ -n "${SPARKLE_PUBLIC_ED_KEY:-}" ]]; then
             file "$APP/Contents/Resources/native/sparkle.node" | grep -q 'x86_64'
+            /usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$APP/Contents/Info.plist" | grep -qx "$SPARKLE_FEED_URL"
             /usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$APP/Contents/Info.plist" | grep -qx "$SPARKLE_PUBLIC_ED_KEY"
+            npx --yes @electron/asar extract "$APP/Contents/Resources/app.asar" "$ASAR_DIR"
+            node -e 'const fs=require("fs"); const pkg=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if (pkg.codexBuildFlavor !== "prod") throw new Error(`Unexpected codexBuildFlavor: ${pkg.codexBuildFlavor}`); if (pkg.codexSparkleFeedUrl !== process.argv[2]) throw new Error(`Unexpected codexSparkleFeedUrl: ${pkg.codexSparkleFeedUrl}`);' "$ASAR_DIR/package.json" "$SPARKLE_FEED_URL"
           fi
+
+          rm -rf "$ASAR_DIR"
 
           # Basic executable sanity.
           "$APP/Contents/Resources/codex" --version >/dev/null
