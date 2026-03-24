@@ -99,6 +99,9 @@ jobs:
     runs-on: macos-latest
     needs: check-upstream
     if: needs.check-upstream.outputs.should_build == 'true'
+    env:
+      SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
+      SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -167,15 +170,15 @@ jobs:
       - name: Repackage Intel app
         env:
           SPARKLE_FEED_URL: https://github.com/${{ github.repository }}/releases/download/codex-intel-latest/appcast.xml
-          SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
         run: ./scripts/repackage-intel.sh Codex.app Codex-intel.app
 
       - name: Smoke test repackaged app
         env:
-          SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
+          SPARKLE_FEED_URL: https://github.com/${{ github.repository }}/releases/download/codex-intel-latest/appcast.xml
         run: |
           set -euo pipefail
           APP="Codex-intel.app"
+          ASAR_DIR="$(mktemp -d)"
 
           # Critical Intel slices must be x86_64.
           file "$APP/Contents/MacOS/Codex" | grep -q 'x86_64'
@@ -190,8 +193,13 @@ jobs:
 
           if [[ -n "${SPARKLE_PUBLIC_ED_KEY:-}" ]]; then
             file "$APP/Contents/Resources/native/sparkle.node" | grep -q 'x86_64'
+            /usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$APP/Contents/Info.plist" | grep -qx "$SPARKLE_FEED_URL"
             /usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$APP/Contents/Info.plist" | grep -qx "$SPARKLE_PUBLIC_ED_KEY"
+            npx --yes @electron/asar extract "$APP/Contents/Resources/app.asar" "$ASAR_DIR"
+            node -e 'const fs=require("fs"); const pkg=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if (pkg.codexBuildFlavor !== "prod") throw new Error(`Unexpected codexBuildFlavor: ${pkg.codexBuildFlavor}`); if (pkg.codexSparkleFeedUrl !== process.argv[2]) throw new Error(`Unexpected codexSparkleFeedUrl: ${pkg.codexSparkleFeedUrl}`);' "$ASAR_DIR/package.json" "$SPARKLE_FEED_URL"
           fi
+
+          rm -rf "$ASAR_DIR"
 
           # Basic executable sanity.
           "$APP/Contents/Resources/codex" --version >/dev/null
@@ -206,9 +214,7 @@ jobs:
           shasum -a 256 "Codex-intel-latest.zip" > "Codex-intel-latest.sha256"
 
       - name: Generate Sparkle appcast
-        if: secrets.SPARKLE_PRIVATE_KEY != '' && secrets.SPARKLE_PUBLIC_ED_KEY != ''
-        env:
-          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        if: env.SPARKLE_PRIVATE_KEY != '' && env.SPARKLE_PUBLIC_ED_KEY != ''
         run: |
           set -euo pipefail
           rm -rf sparkle-feed

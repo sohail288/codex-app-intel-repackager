@@ -300,9 +300,19 @@ JSON
     install -m 755 "$spawn_src" "$app_unpacked/node_modules/node-pty/build/Release/spawn-helper"
   fi
 
-  rm -rf "$app_unpacked/node_modules/node-pty/bin"/darwin-arm64-*
   mkdir -p "$app_unpacked/node_modules/node-pty/bin/darwin-x64-$target_abi"
   install -m 755 "$pty_src" "$app_unpacked/node_modules/node-pty/bin/darwin-x64-$target_abi/node-pty.node"
+}
+
+prune_arm64_native_artifacts() {
+  local app_unpacked="$OUT_APP/Contents/Resources/app.asar.unpacked"
+
+  if [[ ! -d "$app_unpacked/node_modules/node-pty/bin" ]]; then
+    return
+  fi
+
+  log "Removing stale arm64 node-pty bundle artifacts"
+  rm -rf "$app_unpacked/node_modules/node-pty/bin"/darwin-arm64-*
 }
 
 set_dev_flavor() {
@@ -517,6 +527,7 @@ main() {
   set_dev_flavor
   patch_sparkle_metadata
   build_sparkle_addon
+  prune_arm64_native_artifacts
   strip_sparkle_for_dev
   ad_hoc_sign
   clear_quarantine
