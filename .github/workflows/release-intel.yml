@@ -165,9 +165,14 @@ jobs:
           fi
 
       - name: Repackage Intel app
+        env:
+          SPARKLE_FEED_URL: https://github.com/${{ github.repository }}/releases/download/codex-intel-latest/appcast.xml
+          SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
         run: ./scripts/repackage-intel.sh Codex.app Codex-intel.app
 
       - name: Smoke test repackaged app
+        env:
+          SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
         run: |
           set -euo pipefail
           APP="Codex-intel.app"
@@ -183,6 +188,11 @@ jobs:
             "$APP/Contents/Resources/rg" --version >/dev/null
           fi
 
+          if [[ -n "${SPARKLE_PUBLIC_ED_KEY:-}" ]]; then
+            file "$APP/Contents/Resources/native/sparkle.node" | grep -q 'x86_64'
+            /usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$APP/Contents/Info.plist" | grep -qx "$SPARKLE_PUBLIC_ED_KEY"
+          fi
+
           # Basic executable sanity.
           "$APP/Contents/Resources/codex" --version >/dev/null
           codesign --verify --deep --strict "$APP"
@@ -192,6 +202,23 @@ jobs:
           set -euo pipefail
           ditto -c -k --sequesterRsrc --keepParent Codex-intel.app "Codex-intel-${{ needs.check-upstream.outputs.short_version }}-${{ needs.check-upstream.outputs.build_version }}.zip"
           shasum -a 256 "Codex-intel-${{ needs.check-upstream.outputs.short_version }}-${{ needs.check-upstream.outputs.build_version }}.zip" > "Codex-intel-${{ needs.check-upstream.outputs.short_version }}-${{ needs.check-upstream.outputs.build_version }}.sha256"
+          cp "Codex-intel-${{ needs.check-upstream.outputs.short_version }}-${{ needs.check-upstream.outputs.build_version }}.zip" "Codex-intel-latest.zip"
+          shasum -a 256 "Codex-intel-latest.zip" > "Codex-intel-latest.sha256"
+
+      - name: Generate Sparkle appcast
+        if: secrets.SPARKLE_PRIVATE_KEY != '' && secrets.SPARKLE_PUBLIC_ED_KEY != ''
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          rm -rf sparkle-feed
+          mkdir -p sparkle-feed
+          cp "Codex-intel-latest.zip" sparkle-feed/
+          ./scripts/generate_appcast.sh \
+            sparkle-feed \
+            sparkle-feed/appcast.xml \
+            "https://github.com/${{ github.repository }}/releases/download/codex-intel-latest/"
+          cp sparkle-feed/appcast.xml appcast.xml
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -229,22 +256,24 @@ jobs:
             - Upstream version: `${{ needs.check-upstream.outputs.short_version }}`
             - Upstream build: `${{ needs.check-upstream.outputs.build_version }}`
           files: |
-            Codex-intel-${{ needs.check-upstream.outputs.short_version }}-${{ needs.check-upstream.outputs.build_version }}.zip
-            Codex-intel-${{ needs.check-upstream.outputs.short_version }}-${{ needs.check-upstream.outputs.build_version }}.sha256
-          fail_on_unmatched_files: true
+            Codex-intel-latest.zip
+            Codex-intel-latest.sha256
+            appcast.xml
+          fail_on_unmatched_files: false
 
       - name: Prune stale latest assets
         uses: actions/github-script@v7
         env:
-          KEEP_ZIP: Codex-intel-${{ needs.check-upstream.outputs.short_version }}-${{ needs.check-upstream.outputs.build_version }}.zip
-          KEEP_SHA: Codex-intel-${{ needs.check-upstream.outputs.short_version }}-${{ needs.check-upstream.outputs.build_version }}.sha256
+          KEEP_ZIP: Codex-intel-latest.zip
+          KEEP_SHA: Codex-intel-latest.sha256
+          KEEP_APPCAST: appcast.xml
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const tag = "codex-intel-latest";
-            const keep = new Set([process.env.KEEP_ZIP, process.env.KEEP_SHA]);
+            const keep = new Set([process.env.KEEP_ZIP, process.env.KEEP_SHA, process.env.KEEP_APPCAST]);
 
             const rel = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
             const assets = rel.data.assets || [];
