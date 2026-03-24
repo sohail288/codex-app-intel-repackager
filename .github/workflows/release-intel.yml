@@ -99,6 +99,9 @@ jobs:
     runs-on: macos-latest
     needs: check-upstream
     if: needs.check-upstream.outputs.should_build == 'true'
+    env:
+      SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
+      SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -167,12 +170,11 @@ jobs:
       - name: Repackage Intel app
         env:
           SPARKLE_FEED_URL: https://github.com/${{ github.repository }}/releases/download/codex-intel-latest/appcast.xml
-          SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
         run: ./scripts/repackage-intel.sh Codex.app Codex-intel.app
 
       - name: Smoke test repackaged app
         env:
-          SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
+          SPARKLE_FEED_URL: https://github.com/${{ github.repository }}/releases/download/codex-intel-latest/appcast.xml
         run: |
           set -euo pipefail
           APP="Codex-intel.app"
@@ -206,9 +208,7 @@ jobs:
           shasum -a 256 "Codex-intel-latest.zip" > "Codex-intel-latest.sha256"
 
       - name: Generate Sparkle appcast
-        if: secrets.SPARKLE_PRIVATE_KEY != '' && secrets.SPARKLE_PUBLIC_ED_KEY != ''
-        env:
-          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        if: env.SPARKLE_PRIVATE_KEY != '' && env.SPARKLE_PUBLIC_ED_KEY != ''
         run: |
           set -euo pipefail
           rm -rf sparkle-feed
