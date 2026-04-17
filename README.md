@@ -49,9 +49,8 @@ What it does:
 1. Copies `Codex.app` to `Codex-intel.app`.
 2. Downloads Electron `darwin-x64` runtime matching bundled Electron version.
 3. Replaces runtime binaries/framework inside app bundle.
-4. Rebuilds native modules for Electron x64:
-   - `better-sqlite3@12.4.6`
-   - `node-pty@1.1.0`
+4. Inspects the upstream app bundle and derives the exact Electron/native-module versions from the shipped artifact.
+5. Rebuilds the upstream app's native modules for Electron x64 using those discovered versions instead of repo-pinned guesses.
 5. Replaces bundled helper binaries that remain arm64-only, including `Contents/Resources/rg`.
 6. Rebuilds an Intel `sparkle.node` addon when Sparkle is kept enabled.
 7. Defaults to `BUILD_FLAVOR=dev` only when no GitHub-release Sparkle config is provided.
@@ -79,6 +78,7 @@ Output:
 ### Useful overrides
 
 - `ELECTRON_VERSION=40.0.0 ./scripts/repackage-intel.sh`
+- `INSPECT_ONLY=1 ./scripts/repackage-intel.sh Codex.app` (print discovered upstream metadata JSON and exit)
 - `SKIP_NATIVE_REBUILD=1 ./scripts/repackage-intel.sh` (runtime-only swap)
 - `KEEP_PROD_FLAVOR=1 ./scripts/repackage-intel.sh` (keeps Sparkle enabled and rebuilds the Intel updater bridge)
 - `SIGN_APP=1 SIGN_IDENTITY=- ./scripts/repackage-intel.sh` (attempt ad-hoc signing; disabled by default)

@@ -167,6 +167,33 @@ jobs:
             hdiutil detach "$MNT"
           fi
 
+      - name: Inspect upstream bundle metadata
+        run: |
+          set -euo pipefail
+          python3 scripts/inspect_upstream_bundle.py Codex.app > upstream-bundle-metadata.json
+          cat upstream-bundle-metadata.json
+          python3 - "$GITHUB_STEP_SUMMARY" upstream-bundle-metadata.json <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          summary_path = pathlib.Path(sys.argv[1])
+          metadata = json.load(open(sys.argv[2], "r", encoding="utf-8"))
+          mods = {item["name"]: item["version"] for item in metadata["native_modules"]}
+
+          summary_path.write_text(
+              "## Upstream Bundle Metadata\n"
+              f"- Electron version: `{metadata['electron_version']}`\n"
+              f"- Codex version: `{metadata['short_version']}`\n"
+              f"- Codex build: `{metadata['build_version']}`\n"
+              f"- better-sqlite3: `{mods['better-sqlite3']}`\n"
+              f"- node-pty: `{mods['node-pty']}`\n"
+              f"- node-pty ABI suffix: `{metadata['node_pty_abi_suffix']}`\n"
+              f"- Sparkle enabled upstream: `{metadata['sparkle_enabled']}`\n",
+              encoding="utf-8",
+          )
+          PY
+
       - name: Repackage Intel app
         env:
           SPARKLE_FEED_URL: https://github.com/${{ github.repository }}/releases/download/codex-intel-latest/appcast.xml
@@ -185,6 +212,15 @@ jobs:
           file "$APP/Contents/Resources/codex" | grep -q 'x86_64'
           file "$APP/Contents/Resources/app.asar.unpacked/node_modules/node-pty/build/Release/pty.node" | grep -q 'x86_64'
           file "$APP/Contents/Resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node" | grep -q 'x86_64'
+          if [[ -d "$APP/Contents/Resources/app.asar.unpacked/node_modules/node-pty/bin" ]]; then
+            PTY_BIN="$(find "$APP/Contents/Resources/app.asar.unpacked/node_modules/node-pty/bin" -maxdepth 1 -type d -name 'darwin-x64-*' | head -n 1 || true)"
+            if [[ -z "$PTY_BIN" ]]; then
+              echo "x64 node-pty ABI directory not found" >&2
+              find "$APP/Contents/Resources/app.asar.unpacked/node_modules/node-pty/bin" -maxdepth 2 -type f | sed -n '1,120p' >&2 || true
+              exit 1
+            fi
+            file "$PTY_BIN/node-pty.node" | grep -q 'x86_64'
+          fi
 
           if [[ -x "$APP/Contents/Resources/rg" ]]; then
             file "$APP/Contents/Resources/rg" | grep -q 'x86_64'
