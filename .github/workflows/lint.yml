@@ -49,53 +49,53 @@ jobs:
             "$APP_SRC/node_modules/better-sqlite3" \
             "$APP_SRC/node_modules/node-pty"
           python3 - "$APP" <<'PY'
-import plistlib
-import pathlib
-import sys
+          import plistlib
+          import pathlib
+          import sys
 
-app = pathlib.Path(sys.argv[1])
+          app = pathlib.Path(sys.argv[1])
 
-with (app / "Contents" / "Info.plist").open("wb") as handle:
-    plistlib.dump(
-        {
-            "CFBundleShortVersionString": "260206.1448",
-            "CFBundleVersion": "565",
-        },
-        handle,
-    )
+          with (app / "Contents" / "Info.plist").open("wb") as handle:
+              plistlib.dump(
+                  {
+                      "CFBundleShortVersionString": "260206.1448",
+                      "CFBundleVersion": "565",
+                  },
+                  handle,
+              )
 
-with (app / "Contents" / "Frameworks" / "Electron Framework.framework" / "Resources" / "Info.plist").open("wb") as handle:
-    plistlib.dump(
-        {
-            "CFBundleVersion": "40.0.0",
-        },
-        handle,
-    )
-PY
+          with (app / "Contents" / "Frameworks" / "Electron Framework.framework" / "Resources" / "Info.plist").open("wb") as handle:
+              plistlib.dump(
+                  {
+                      "CFBundleVersion": "40.0.0",
+                  },
+                  handle,
+              )
+          PY
           python3 - "$APP_SRC" <<'PY'
-import json
-import pathlib
-import sys
+          import json
+          import pathlib
+          import sys
 
-root = pathlib.Path(sys.argv[1])
-(root / "package.json").write_text(json.dumps({"name": "openai-codex-electron", "version": "26.0.0"}) + "\n", encoding="utf-8")
-(root / "node_modules" / "better-sqlite3" / "package.json").write_text(json.dumps({"name": "better-sqlite3", "version": "12.5.0"}) + "\n", encoding="utf-8")
-(root / "node_modules" / "node-pty" / "package.json").write_text(json.dumps({"name": "node-pty", "version": "1.1.0"}) + "\n", encoding="utf-8")
-PY
+          root = pathlib.Path(sys.argv[1])
+          (root / "package.json").write_text(json.dumps({"name": "openai-codex-electron", "version": "26.0.0"}) + "\n", encoding="utf-8")
+          (root / "node_modules" / "better-sqlite3" / "package.json").write_text(json.dumps({"name": "better-sqlite3", "version": "12.5.0"}) + "\n", encoding="utf-8")
+          (root / "node_modules" / "node-pty" / "package.json").write_text(json.dumps({"name": "node-pty", "version": "1.1.0"}) + "\n", encoding="utf-8")
+          PY
           npm_config_cache="$(mktemp -d)" npm_config_loglevel=error npm_config_update_notifier=false \
             npx --yes @electron/asar pack "$APP_SRC" "$APP/Contents/Resources/app.asar"
           python3 scripts/inspect_upstream_bundle.py "$APP" > bundle-metadata.json
           python3 - <<'PY'
-import json
+          import json
 
-data = json.load(open("bundle-metadata.json", "r", encoding="utf-8"))
-mods = {item["name"]: item["version"] for item in data["native_modules"]}
+          data = json.load(open("bundle-metadata.json", "r", encoding="utf-8"))
+          mods = {item["name"]: item["version"] for item in data["native_modules"]}
 
-assert data["electron_version"] == "40.0.0", data
-assert data["node_pty_abi_suffix"] == "143", data
-assert mods["better-sqlite3"] == "12.5.0", data
-assert mods["node-pty"] == "1.1.0", data
-PY
+          assert data["electron_version"] == "40.0.0", data
+          assert data["node_pty_abi_suffix"] == "143", data
+          assert mods["better-sqlite3"] == "12.5.0", data
+          assert mods["node-pty"] == "1.1.0", data
+          PY
 
       - name: ShellCheck
         run: |

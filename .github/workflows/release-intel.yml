@@ -173,26 +173,26 @@ jobs:
           python3 scripts/inspect_upstream_bundle.py Codex.app > upstream-bundle-metadata.json
           cat upstream-bundle-metadata.json
           python3 - "$GITHUB_STEP_SUMMARY" upstream-bundle-metadata.json <<'PY'
-import json
-import pathlib
-import sys
+          import json
+          import pathlib
+          import sys
 
-summary_path = pathlib.Path(sys.argv[1])
-metadata = json.load(open(sys.argv[2], "r", encoding="utf-8"))
-mods = {item["name"]: item["version"] for item in metadata["native_modules"]}
+          summary_path = pathlib.Path(sys.argv[1])
+          metadata = json.load(open(sys.argv[2], "r", encoding="utf-8"))
+          mods = {item["name"]: item["version"] for item in metadata["native_modules"]}
 
-summary_path.write_text(
-    "## Upstream Bundle Metadata\n"
-    f"- Electron version: `{metadata['electron_version']}`\n"
-    f"- Codex version: `{metadata['short_version']}`\n"
-    f"- Codex build: `{metadata['build_version']}`\n"
-    f"- better-sqlite3: `{mods['better-sqlite3']}`\n"
-    f"- node-pty: `{mods['node-pty']}`\n"
-    f"- node-pty ABI suffix: `{metadata['node_pty_abi_suffix']}`\n"
-    f"- Sparkle enabled upstream: `{metadata['sparkle_enabled']}`\n",
-    encoding="utf-8",
-)
-PY
+          summary_path.write_text(
+              "## Upstream Bundle Metadata\n"
+              f"- Electron version: `{metadata['electron_version']}`\n"
+              f"- Codex version: `{metadata['short_version']}`\n"
+              f"- Codex build: `{metadata['build_version']}`\n"
+              f"- better-sqlite3: `{mods['better-sqlite3']}`\n"
+              f"- node-pty: `{mods['node-pty']}`\n"
+              f"- node-pty ABI suffix: `{metadata['node_pty_abi_suffix']}`\n"
+              f"- Sparkle enabled upstream: `{metadata['sparkle_enabled']}`\n",
+              encoding="utf-8",
+          )
+          PY
 
       - name: Repackage Intel app
         env:
