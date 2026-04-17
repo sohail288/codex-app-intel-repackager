@@ -8,21 +8,36 @@ WORK_DIR="${WORK_DIR:-$ROOT_DIR/.build-intel}"
 ELECTRON_VERSION="${ELECTRON_VERSION:-}"
 ELECTRON_ZIP="${ELECTRON_ZIP:-}"
 SKIP_NATIVE_REBUILD="${SKIP_NATIVE_REBUILD:-0}"
+INSPECT_ONLY="${INSPECT_ONLY:-0}"
 KEEP_PROD_FLAVOR="${KEEP_PROD_FLAVOR:-0}"
 SIGN_APP="${SIGN_APP:-1}"
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-}"
 SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-}"
 CODEX_X64_BINARY="${CODEX_X64_BINARY:-}"
+DOWNLOAD_LATEST_CODEX_CLI="${DOWNLOAD_LATEST_CODEX_CLI:-1}"
 RG_X64_BINARY="${RG_X64_BINARY:-}"
 RIPGREP_VERSION="${RIPGREP_VERSION:-14.1.1}"
 RIPGREP_TARBALL_URL="${RIPGREP_TARBALL_URL:-}"
 
-BETTER_SQLITE3_VERSION="12.4.6"
-NODE_PTY_VERSION="1.1.0"
+CURRENT_PHASE="startup"
+APP_METADATA_JSON=""
+ASAR_DIR=""
+NPM_CACHE_DIR=""
+META_ELECTRON_VERSION=""
+META_SHORT_VERSION=""
+META_BUILD_VERSION=""
+META_BETTER_SQLITE3_VERSION=""
+META_NODE_PTY_VERSION=""
+META_NODE_PTY_ABI_SUFFIX=""
+META_SPARKLE_ENABLED=""
 
 log() {
   printf '[repack] %s\n' "$*" >&2
+}
+
+warn() {
+  printf '[repack][warn] %s\n' "$*" >&2
 }
 
 need_cmd() {
@@ -31,6 +46,46 @@ need_cmd() {
     exit 1
   fi
 }
+
+set_phase() {
+  CURRENT_PHASE="$1"
+  log "Phase: $CURRENT_PHASE"
+}
+
+report_failure() {
+  local line="$1"
+  local cmd="$2"
+  local exit_code="$3"
+
+  printf '[repack][error] phase=%s line=%s exit=%s\n' "$CURRENT_PHASE" "$line" "$exit_code" >&2
+  printf '[repack][error] command=%s\n' "$cmd" >&2
+
+  if [[ -n "$APP_METADATA_JSON" && -f "$APP_METADATA_JSON" ]]; then
+    printf '[repack][error] metadata=%s\n' "$APP_METADATA_JSON" >&2
+    python3 - "$APP_METADATA_JSON" <<'PY' >&2 || true
+import json
+import sys
+
+path = sys.argv[1]
+data = json.load(open(path, "r", encoding="utf-8"))
+mods = {item["name"]: item["version"] for item in data.get("native_modules", [])}
+print(
+    "[repack][error] summary "
+    f"electron={data.get('electron_version')} "
+    f"short_version={data.get('short_version')} "
+    f"build_version={data.get('build_version')} "
+    f"better-sqlite3={mods.get('better-sqlite3')} "
+    f"node-pty={mods.get('node-pty')} "
+    f"node_pty_abi_suffix={data.get('node_pty_abi_suffix')} "
+    f"sparkle_enabled={data.get('sparkle_enabled')}"
+)
+PY
+  fi
+
+  exit "$exit_code"
+}
+
+trap 'report_failure "${LINENO}" "${BASH_COMMAND}" "$?"' ERR
 
 abs_path() {
   local p="$1"
@@ -53,6 +108,75 @@ copy_binary_slice() {
   local src="$1"
   local dst="$2"
   install -m 755 "$src" "$dst"
+}
+
+run_asar() {
+  npm_config_cache="$NPM_CACHE_DIR" \
+  npm_config_loglevel=error \
+  npm_config_update_notifier=false \
+  npx --yes @electron/asar "$@"
+}
+
+json_get() {
+  local path="$1"
+  local expr="$2"
+  python3 - "$path" "$expr" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], "r", encoding="utf-8"))
+expr = sys.argv[2]
+value = data
+for part in expr.split("."):
+    if isinstance(value, list):
+        value = value[int(part)]
+    else:
+        value = value[part]
+if isinstance(value, bool):
+    print("true" if value else "false")
+else:
+    print(value)
+PY
+}
+
+load_upstream_metadata() {
+  APP_METADATA_JSON="$WORK_DIR/upstream-bundle-metadata.json"
+  python3 "$ROOT_DIR/scripts/inspect_upstream_bundle.py" "$SRC_APP" > "$APP_METADATA_JSON"
+
+  META_ELECTRON_VERSION="$(json_get "$APP_METADATA_JSON" "electron_version")"
+  META_SHORT_VERSION="$(json_get "$APP_METADATA_JSON" "short_version")"
+  META_BUILD_VERSION="$(json_get "$APP_METADATA_JSON" "build_version")"
+  META_BETTER_SQLITE3_VERSION="$(json_get "$APP_METADATA_JSON" "native_modules.0.version")"
+  META_NODE_PTY_VERSION="$(json_get "$APP_METADATA_JSON" "native_modules.1.version")"
+  META_NODE_PTY_ABI_SUFFIX="$(json_get "$APP_METADATA_JSON" "node_pty_abi_suffix")"
+  META_SPARKLE_ENABLED="$(json_get "$APP_METADATA_JSON" "sparkle_enabled")"
+
+  log "Upstream metadata: Electron=$META_ELECTRON_VERSION Codex=$META_SHORT_VERSION ($META_BUILD_VERSION) better-sqlite3=$META_BETTER_SQLITE3_VERSION node-pty=$META_NODE_PTY_VERSION abi=$META_NODE_PTY_ABI_SUFFIX sparkle=$META_SPARKLE_ENABLED"
+}
+
+ensure_asar_dir() {
+  if [[ -d "$ASAR_DIR" ]]; then
+    return
+  fi
+
+  set_phase "extract app.asar"
+  rm -rf "$ASAR_DIR"
+  mkdir -p "$ASAR_DIR"
+  run_asar extract "$OUT_APP/Contents/Resources/app.asar" "$ASAR_DIR"
+}
+
+stage_npm_package_source() {
+  local package_name="$1"
+  local package_version="$2"
+  local dest_dir="$3"
+  local tarball
+
+  rm -rf "$dest_dir"
+  mkdir -p "$dest_dir"
+
+  tarball="$(cd "$WORK_DIR" && npm pack "${package_name}@${package_version}")"
+  tar -xzf "$WORK_DIR/$tarball" -C "$dest_dir" --strip-components=1
+  rm -f "$WORK_DIR/$tarball"
 }
 
 is_x64_macho() {
@@ -83,6 +207,32 @@ find_x64_codex_binary() {
     return 0
   fi
 
+  return 1
+}
+
+install_latest_codex_cli() {
+  local cli_dir candidate
+
+  cli_dir="$WORK_DIR/codex-cli"
+  rm -rf "$cli_dir"
+  mkdir -p "$cli_dir"
+
+  log "Installing latest Codex CLI into build workspace"
+  npm install \
+    --prefix "$cli_dir" \
+    --no-audit \
+    --no-fund \
+    @openai/codex@latest \
+    >/dev/null
+
+  candidate="$(find "$cli_dir" -type f -path '*/x86_64-apple-darwin/codex/codex' | head -n 1 || true)"
+  if [[ -n "$candidate" && -x "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  echo "latest Codex CLI install did not produce an x64 binary under $cli_dir" >&2
+  find "$cli_dir" -maxdepth 8 -type f -name codex | sed -n '1,120p' >&2 || true
   return 1
 }
 
@@ -145,6 +295,14 @@ download_x64_rg_binary() {
 replace_bundled_codex_cli() {
   local src dst
   dst="$OUT_APP/Contents/Resources/codex"
+
+  if [[ "$DOWNLOAD_LATEST_CODEX_CLI" == "1" ]]; then
+    if src="$(install_latest_codex_cli)"; then
+      log "Replacing bundled Resources/codex with x64 binary from freshly installed latest Codex CLI: $src"
+      copy_binary_slice "$src" "$dst"
+      return
+    fi
+  fi
 
   if src="$(find_x64_codex_binary)"; then
     log "Replacing bundled Resources/codex with x64 binary from: $src"
@@ -253,43 +411,54 @@ replace_runtime() {
 
 build_native_modules() {
   local native_dir="$WORK_DIR/native"
-  local target_abi="143"
+  local app_unpacked="$OUT_APP/Contents/Resources/app.asar.unpacked"
+  local bs_stage="$native_dir/better-sqlite3"
+  local pty_stage="$native_dir/node-pty"
+  local bs_src="$bs_stage/build/Release/better_sqlite3.node"
+  local pty_src="$pty_stage/build/Release/pty.node"
+  local spawn_src="$pty_stage/build/Release/spawn-helper"
 
-  log "Building Intel native modules for Electron $ELECTRON_VERSION"
+  [[ -d "$app_unpacked/node_modules/better-sqlite3" ]] || { echo "missing unpacked better-sqlite3 directory: $app_unpacked/node_modules/better-sqlite3" >&2; exit 1; }
+  [[ -d "$app_unpacked/node_modules/node-pty" ]] || { echo "missing unpacked node-pty directory: $app_unpacked/node_modules/node-pty" >&2; exit 1; }
+
+  log "Building Intel native modules for Electron $META_ELECTRON_VERSION from upstream package versions"
   rm -rf "$native_dir"
   mkdir -p "$native_dir"
 
-  cat > "$native_dir/package.json" <<JSON
-{
-  "name": "codex-intel-native-rebuild",
-  "private": true,
-  "license": "UNLICENSED",
-  "dependencies": {
-    "better-sqlite3": "$BETTER_SQLITE3_VERSION",
-    "node-pty": "$NODE_PTY_VERSION"
-  }
-}
-JSON
+  set_phase "stage native module sources"
+  stage_npm_package_source "better-sqlite3" "$META_BETTER_SQLITE3_VERSION" "$bs_stage"
+  stage_npm_package_source "node-pty" "$META_NODE_PTY_VERSION" "$pty_stage"
 
+  set_phase "rebuild better-sqlite3"
   (
-    cd "$native_dir"
-    npm install --ignore-scripts --no-audit --no-fund
-    npm rebuild better-sqlite3 node-pty \
+    cd "$bs_stage"
+    rm -rf node_modules build/Release
+    npm install --ignore-scripts --omit=dev --no-audit --no-fund
+    npm rebuild \
       --build-from-source \
       --runtime=electron \
-      --target="$ELECTRON_VERSION" \
+      --target="$META_ELECTRON_VERSION" \
       --dist-url=https://electronjs.org/headers \
       --arch=x64
   )
 
-  local app_unpacked="$OUT_APP/Contents/Resources/app.asar.unpacked"
-  local bs_src="$native_dir/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
-  local pty_src="$native_dir/node_modules/node-pty/build/Release/pty.node"
-  local spawn_src="$native_dir/node_modules/node-pty/build/Release/spawn-helper"
+  set_phase "rebuild node-pty"
+  (
+    cd "$pty_stage"
+    rm -rf build/Release
+    npm install --ignore-scripts --omit=dev --no-audit --no-fund
+    npm rebuild \
+      --build-from-source \
+      --runtime=electron \
+      --target="$META_ELECTRON_VERSION" \
+      --dist-url=https://electronjs.org/headers \
+      --arch=x64
+  )
 
   [[ -f "$bs_src" ]] || { echo "missing rebuilt better_sqlite3.node" >&2; exit 1; }
   [[ -f "$pty_src" ]] || { echo "missing rebuilt pty.node" >&2; exit 1; }
 
+  set_phase "install native modules"
   log "Installing rebuilt better-sqlite3"
   install -m 755 "$bs_src" "$app_unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
 
@@ -300,8 +469,10 @@ JSON
     install -m 755 "$spawn_src" "$app_unpacked/node_modules/node-pty/build/Release/spawn-helper"
   fi
 
-  mkdir -p "$app_unpacked/node_modules/node-pty/bin/darwin-x64-$target_abi"
-  install -m 755 "$pty_src" "$app_unpacked/node_modules/node-pty/bin/darwin-x64-$target_abi/node-pty.node"
+  if [[ -n "$META_NODE_PTY_ABI_SUFFIX" ]]; then
+    mkdir -p "$app_unpacked/node_modules/node-pty/bin/darwin-x64-$META_NODE_PTY_ABI_SUFFIX"
+    install -m 755 "$pty_src" "$app_unpacked/node_modules/node-pty/bin/darwin-x64-$META_NODE_PTY_ABI_SUFFIX/node-pty.node"
+  fi
 }
 
 prune_arm64_native_artifacts() {
@@ -346,13 +517,10 @@ patch_sparkle_metadata() {
   fi
 
   local plist="$OUT_APP/Contents/Info.plist"
-  local asar_dir="$WORK_DIR/app-asar"
-  local package_json="$asar_dir/package.json"
+  local package_json="$ASAR_DIR/package.json"
 
   log "Patching packaged Sparkle feed URL"
-  rm -rf "$asar_dir"
-  mkdir -p "$asar_dir"
-  npx --yes @electron/asar extract "$OUT_APP/Contents/Resources/app.asar" "$asar_dir"
+  ensure_asar_dir
 
   node - "$package_json" "$SPARKLE_FEED_URL" <<'NODE'
 const fs = require('fs');
@@ -365,7 +533,7 @@ fs.writeFileSync(packageJsonPath, `${JSON.stringify(pkg, null, 2)}\n`);
 NODE
 
   rm -f "$OUT_APP/Contents/Resources/app.asar"
-  npx --yes @electron/asar pack "$asar_dir" "$OUT_APP/Contents/Resources/app.asar"
+  run_asar pack "$ASAR_DIR" "$OUT_APP/Contents/Resources/app.asar"
 
   log "Updating Info.plist Sparkle keys"
   /usr/libexec/PlistBuddy -c "Delete :SUFeedURL" "$plist" >/dev/null 2>&1 || true
@@ -399,7 +567,7 @@ build_sparkle_addon() {
     ./node_modules/.bin/node-gyp rebuild \
       --release \
       --arch=x64 \
-      --target="$ELECTRON_VERSION" \
+      --target="$META_ELECTRON_VERSION" \
       --dist-url=https://electronjs.org/headers
   )
 
@@ -482,19 +650,36 @@ main() {
 
   SRC_APP="$(abs_path "$SRC_APP")"
   OUT_APP="$(abs_path "$OUT_APP")"
+  NPM_CACHE_DIR="$WORK_DIR/npm-cache"
+  ASAR_DIR="$WORK_DIR/app-asar"
+  export npm_config_cache="$NPM_CACHE_DIR"
+  export npm_config_devdir="$WORK_DIR/node-gyp"
+  export npm_config_loglevel=error
+  export npm_config_update_notifier=false
 
   [[ -d "$SRC_APP" ]] || { echo "Source app not found: $SRC_APP" >&2; exit 1; }
 
   mkdir -p "$WORK_DIR"
+  set_phase "inspect upstream bundle"
+  load_upstream_metadata
 
   if [[ -z "$ELECTRON_VERSION" ]]; then
-    ELECTRON_VERSION="$(plutil -extract CFBundleVersion raw -o - "$SRC_APP/Contents/Frameworks/Electron Framework.framework/Resources/Info.plist")"
+    ELECTRON_VERSION="$META_ELECTRON_VERSION"
+  elif [[ "$ELECTRON_VERSION" != "$META_ELECTRON_VERSION" ]]; then
+    warn "Overriding detected Electron version $META_ELECTRON_VERSION with ELECTRON_VERSION=$ELECTRON_VERSION"
+    META_ELECTRON_VERSION="$ELECTRON_VERSION"
+  fi
+
+  if [[ "$INSPECT_ONLY" == "1" ]]; then
+    cat "$APP_METADATA_JSON"
+    exit 0
   fi
 
   local runtime_zip="$ELECTRON_ZIP"
   if [[ -z "$runtime_zip" ]]; then
     runtime_zip="$WORK_DIR/electron-v${ELECTRON_VERSION}-darwin-x64.zip"
     if [[ ! -f "$runtime_zip" ]]; then
+      set_phase "download Electron runtime"
       log "Downloading Electron runtime v${ELECTRON_VERSION} (darwin-x64)"
       curl -fL --retry 3 --retry-delay 2 \
         "https://github.com/electron/electron/releases/download/v${ELECTRON_VERSION}/electron-v${ELECTRON_VERSION}-darwin-x64.zip" \
@@ -503,6 +688,7 @@ main() {
   fi
 
   local runtime_dir="$WORK_DIR/electron-runtime"
+  set_phase "extract Electron runtime"
   rm -rf "$runtime_dir"
   mkdir -p "$runtime_dir"
   unzip -q "$runtime_zip" -d "$runtime_dir"
@@ -510,12 +696,16 @@ main() {
   local electron_app="$runtime_dir/Electron.app"
   [[ -d "$electron_app" ]] || { echo "Electron.app not found in runtime zip" >&2; exit 1; }
 
+  set_phase "prepare output app"
   log "Creating output app: $OUT_APP"
   rm -rf "$OUT_APP"
   cp -R "$SRC_APP" "$OUT_APP"
 
+  set_phase "replace Electron runtime"
   replace_runtime "$electron_app"
+  set_phase "replace bundled codex CLI"
   replace_bundled_codex_cli
+  set_phase "replace bundled ripgrep"
   replace_bundled_rg
 
   if [[ "$SKIP_NATIVE_REBUILD" != "1" ]]; then
@@ -524,13 +714,21 @@ main() {
     log "Skipping native module rebuild (SKIP_NATIVE_REBUILD=1)"
   fi
 
+  set_phase "set build flavor"
   set_dev_flavor
+  set_phase "patch Sparkle metadata"
   patch_sparkle_metadata
+  set_phase "build Sparkle addon"
   build_sparkle_addon
+  set_phase "prune stale native artifacts"
   prune_arm64_native_artifacts
+  set_phase "strip Sparkle for dev flavor"
   strip_sparkle_for_dev
+  set_phase "codesign app"
   ad_hoc_sign
+  set_phase "clear quarantine"
   clear_quarantine
+  set_phase "verify architecture"
   verify_arch
 
   log "Done: $OUT_APP"
