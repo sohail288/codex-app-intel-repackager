@@ -80,3 +80,7 @@ Sparkle secrets:
 
 - `SPARKLE_PUBLIC_ED_KEY`
 - `SPARKLE_PRIVATE_KEY`
+
+## Special Thanks
+
+- `JustYannicc` for adding x64 `rg` replacement support and the GitHub Releases / Sparkle auto-update foundation for Intel repacks.
