@@ -2,7 +2,9 @@
 
 > [!IMPORTANT]
 > As of April 16th, OpenAI has officially started supporting intel cpus. This project is no longer necessary
+> 
 > Download the official intel cpu supported Codex App at https://persistent.oaistatic.com/codex-app-prod/Codex-latest-x64.dmg
+>
 > See: https://developers.openai.com/codex/app for more details
 
 Scripts and GitHub Actions workflow for repackaging Codex Desktop so it runs on Intel Macs.
